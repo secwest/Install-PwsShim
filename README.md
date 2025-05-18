@@ -1,6 +1,6 @@
 # PWS Shim
 
-A minimal wrapper that short-hands two common PowerShell invocation patterns.
+A tiny wrapper that abbreviates two common PowerShell launch patterns.
 
 ---
 
@@ -14,14 +14,18 @@ A minimal wrapper that short-hands two common PowerShell invocation patterns.
   * Installs `pws.cmd` in **`C:\Tools`**.
   * Adds **`C:\Tools`** to the machine-wide **PATH** if missing.
 
-* **Self-elevating installer with persistent window**
-  * `Install-PwsShim.ps1` relaunches itself as *Run as Administrator*  
-    (using `-NoExit`) when necessary, so the elevated console stays open.
+* **Self-elevating installer (window remains open)**
+  * `Install-PwsShim.ps1` relaunches itself via *Run as Administrator*  
+    using `-NoExit`, so the elevated console stays open for review.
+
+* **Robust batch logic**
+  * Uses label flow (`goto`) to avoid `%variable%` expansion timing bugs—no
+    delayed-expansion quirks, no duplicate script arguments.
 
 ---
 
 ## Installation
 
 ```powershell
-# From any console – elevation handled automatically
+# From any console – the script will self-elevate if necessary
 .\Install-PwsShim.ps1
