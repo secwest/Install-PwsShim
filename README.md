@@ -1,6 +1,6 @@
 # PWS Shim
 
-A minimal wrapper that short-hands two common PowerShell invocation patterns.
+A minimal wrapper that short-cuts two common PowerShell invocation patterns.
 
 ---
 
