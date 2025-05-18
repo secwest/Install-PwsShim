@@ -210,3 +210,15 @@ Re-run *Install-PwsShim.ps1* any time to recreate the shim.
 | Build agent (trusted repos) | `Bypass` |
 | Shared / multi-tenant server | `RemoteSigned` or `AllSigned`; optionally load profiles in interactive sessions only. |
 | Air-gapped environment | `Bypass`, but sign scripts to track provenance. |
+
+### 8  Safe-usage checklist
+
+1. **Signed code or trusted repo** – if you keep `Bypass`, ensure only trusted
+   scripts are reachable via `pws`.
+2. **Version pinning** – shim picks the *first* `pwsh.exe` it finds; adjust the
+   probe order if you run multiple side-by-side versions.
+3. **Antivirus exclusions** – none needed; AMSI remains active.
+4. **Logging** – the new-window path inherits the parent log settings; redirect
+   if you need transcripts.
+5. **Elevation** – `pws` itself does not auto-elevate; child shells run with the
+   same privilege as the caller.
