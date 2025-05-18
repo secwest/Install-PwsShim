@@ -211,7 +211,7 @@ Re-run *Install-PwsShim.ps1* any time to recreate the shim.
 | Shared / multi-tenant server | `RemoteSigned` or `AllSigned`; optionally load profiles in interactive sessions only. |
 | Air-gapped environment | `Bypass`, but sign scripts to track provenance. |
 
-### 8  Safe-usage checklist
+## 8  Safe-usage checklist
 
 1. **Signed code or trusted repo** – if you keep `Bypass`, ensure only trusted
    scripts are reachable via `pws`.
