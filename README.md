@@ -1,14 +1,15 @@
-# PWS Shim
+# PWS Shim – Complete Documentation
 
-`pws.cmd` is a four-line batch wrapper that standardises two PowerShell launch
-patterns and makes them available system-wide.
+`pws.cmd` is a four-line batch wrapper plus a one-time installer that
+standardises two PowerShell launch patterns and places them on every shell in
+Windows.
 
 | Command | Result |
 |---------|--------|
-| `pws` | Opens a **new** console window.<br>Prefers **pwsh 7**; falls back to Windows PowerShell 5.1. |
+| `pws` | Opens a **new** console window (prefers **pwsh 7**, otherwise Windows PowerShell 5.1). |
 | `pws <script.ps1> [args]` | Runs the script in the **current** console. |
 
-Both modes use:
+Both modes always supply:
 
 ```
 -NoLogo -NoProfile -ExecutionPolicy Bypass
@@ -16,44 +17,83 @@ Both modes use:
 
 ---
 
-## How it works
+## 1  What the installer (`Install-PwsShim.ps1`) does
 
-* **Shim path** `C:\Tools\pws.cmd` (added to machine PATH).  
-* **Engine preference** first matching `pwsh.exe`; otherwise the inbox 5.1 engine.  
-* **Label flow** `goto` avoids `%var%` pre-expansion; no delayed-expansion quirks.  
-* **Installer** `Install-PwsShim.ps1` self-elevates once, rewrites only when the
-  shim content or PATH entry changes (idempotent).
+| Step | Action |
+|------|--------|
+| 1 | **Self-elevates** via *Run as Administrator* (`-NoExit` keeps the summary visible). |
+| 2 | Builds `C:\Tools\pws.cmd` from an internal here-string.<br> • Prefers the first **`pwsh.exe` 7** it finds.<br> • Falls back to the inbox **PowerShell 5.1** executable. |
+| 3 | Writes/rewrites **only if file content changed** (idempotent). |
+| 4 | Adds **`C:\Tools`** to the machine `PATH` if missing. |
+| 5 | Prints whether the file was written/updated and whether `PATH` was touched. |
+
+Re-running the installer when nothing has changed exits after step 1.
 
 ---
 
-## Installation
+## 2  Inside the shim
 
-### A. Local copy (recommended)
+```batch
+@echo off
+setlocal
+rem -- pick engine: first pwsh 7, else Windows PowerShell 5.1 -------------
+for %%P in ("%ProgramFiles%\PowerShell\pwsh.exe" ^
+            "%ProgramFiles%\PowerShell\7\pwsh.exe" ^
+            "%ProgramFiles%\PowerShell\7-preview\pwsh.exe" ^
+            "pwsh.exe") do (
+    if not defined PS if exist "%%~P" set "PS=%%~P"
+)
+if not defined PS set "PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+
+rem -- branch on argument count ------------------------------------------
+if "%~1"=="" goto interactive
+
+:runfile
+set "script=%~1"
+shift
+"%PS%" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%script%" %*
+goto :eof
+
+:interactive
+start "" "%PS%" -NoLogo -NoProfile -ExecutionPolicy Bypass
+goto :eof
+```
+
+* **Label flow** guarantees `%script%` expands after it’s set—no delayed
+  expansion required.
+* `start` creates a detached window for interactive sessions; scripts stay in
+  the parent window.
+
+---
+
+## 3  Installation methods
+
+### A Local copy (recommended)
 
 ```powershell
-# any console – auto-elevates if needed
+# any console – auto-elevates if necessary
 .\Install-PwsShim.ps1
 ```
 
-### B. Stream directly from GitHub
+### B Stream directly from GitHub (no file on disk first)
 
 ```powershell
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
   -Command "iwr -UseBasicParsing 'https://raw.githubusercontent.com/secwest/Install-PwsShim/refs/heads/main/Install-PwsShim.ps1' | iex"
 ```
 
-After either method open a **new** shell so PATH is refreshed.
+Open a **new** shell afterward so the updated `PATH` is loaded.
 
 ---
 
-## Usage examples
+## 4  Using the shim
 
 ```console
 C:\> pws
-# → new pwsh window if installed
+# → new pwsh window if installed, else 5.1
 
-C:\> pws .\build.ps1 -Verbose
-# → runs build.ps1 in current window
+C:\> pws .\deploy.ps1 -Stage Prod
+# → runs deploy.ps1 in the same window
 
 C:\> pws -
 # → executes script piped via STDIN
@@ -61,40 +101,34 @@ C:\> pws -
 
 ---
 
-## Flags, security notes, customisation
+## 5  Flags, security notes, customisation
 
-### 1 Flags always passed
+### 5.1  Flags always passed
 
-| Flag | Meaning | Caveats |
-|------|---------|---------|
-| `-NoLogo` | Hides banner text. | None |
-| `-NoProfile` | Skips *all* profile scripts. | Aliases/modules in profiles are not loaded. |
-| `-ExecutionPolicy Bypass` | Disables the local execution-policy gate for this process. | Any script runs; AMSI/Defender/AppLocker remain active. |
+| Flag | Meaning | Rationale | Caveats |
+|------|---------|-----------|---------|
+| `-NoLogo` | Suppresses banner text. | Cleaner logs and pipelines. | None. |
+| `-NoProfile` | Skips **all** profile scripts (`AllUsers*`, `CurrentUser*`). | Deterministic startup; avoids crashes from broken profiles. | No aliases or module autoloads from profiles. |
+| `-ExecutionPolicy Bypass` | Ignores local execution-policy check *for this process only*. | Works the same on dev boxes, build agents, and locked-down servers. | Any script runs; use a stricter policy if untrusted code can reach `pws`. |
 
-**Why *Bypass* matters**
+**Why *Bypass* can be risky**
 
-* Ignores GPO/registry policy and zone identifiers.  
-* Fine for controlled CI agents; risky on multi-user hosts.
+* Does **not** disable AMSI, Defender, or AppLocker.  
+* Does ignore GPO/registry policy and zone identifiers.  
+* Acceptable for CI pipelines; riskier on multi-user hosts.
 
-### 2 Running profile scripts manually
+### 5.2  Running profile scripts manually
 
-`-NoProfile` stops PowerShell from loading these four files at start-up:
-
-| Variable | Scope |
-|----------|-------|
-| `$PROFILE.AllUsersAllHosts` |
-| `$PROFILE.AllUsersCurrentHost` |
-| `$PROFILE.CurrentUserAllHosts` |
-| `$PROFILE.CurrentUserCurrentHost` (alias `$PROFILE`) |
-
-Dot-source whichever ones you need after `pws` launches:
+`-NoProfile` blocks PowerShell’s automatic loading sequence.  
+Dot-source only what you need:
 
 ```powershell
-. $PROFILE.CurrentUserAllHosts           # user-wide tweaks
-. $PROFILE                               # user + current host
+. $PROFILE                       # current user + current host
+. $PROFILE.CurrentUserAllHosts   # user-wide for all hosts
+. $PROFILE.AllUsersAllHosts      # system-wide for all hosts
 ```
 
-To reload *all* profiles in the usual order:
+Reload *all* four in startup order:
 
 ```powershell
 foreach ($p in $PROFILE.AllUsersAllHosts,
@@ -105,7 +139,7 @@ foreach ($p in $PROFILE.AllUsersAllHosts,
 }
 ```
 
-### 3 Changing defaults
+### 5.3  Changing defaults
 
 * **Different policy**
 
@@ -113,31 +147,36 @@ foreach ($p in $PROFILE.AllUsersAllHosts,
   -NoLogo -NoProfile -ExecutionPolicy RemoteSigned
   ```
 
-* **Keep profiles in interactive mode**
+* **Load profiles only when interactive**
 
   ```batch
   if "%~1"=="" (
-      start "" "%PS%" -NoLogo -ExecutionPolicy Bypass   &rem profiles load
+      start "" "%PS%" -NoLogo -ExecutionPolicy Bypass   &rem profiles load here
   ) else (
       ...
   )
   ```
 
-* **Extra flags** – `-WorkingDirectory`, `-WindowStyle Hidden`, `-Command ...`
+* **Extra flags**
 
-Edit the here-string in `Install-PwsShim.ps1`; re-run the installer.
+  * `-WorkingDirectory <path>`
+  * `-WindowStyle Hidden`
+  * `-Command "<one-liner>"`
 
-### 4 Safe-usage checklist
+Edit the here-string in `Install-PwsShim.ps1`; rerun the installer—it rewrites
+only if content changed.
 
-1. Use trusted or signed scripts if you keep *Bypass*.  
-2. Adjust probe order if multiple pwsh builds exist.  
-3. No AV exclusions needed; AMSI still scans.  
-4. Redirect output if you need transcripts; `pws` inherits parent logging.  
-5. `pws` does **not** auto-elevate; child shells keep caller privilege.
+### 5.4  Safe-usage checklist
+
+1. Signed or trusted scripts if you keep *Bypass*.  
+2. Adjust probe order if multiple pwsh versions exist.  
+3. No AV exclusions needed; AMSI stays active.  
+4. Redirect output if you need transcripts—`pws` inherits parent logging.  
+5. The shim does **not** auto-elevate; child shells keep caller privilege.
 
 ---
 
-## Recovery / rollback
+## 6  Recovery / rollback
 
 ```powershell
 Remove-Item C:\Tools\pws.cmd
@@ -151,11 +190,11 @@ Re-run *Install-PwsShim.ps1* any time to recreate the shim.
 
 ---
 
-## Quick policy reference
+## 7  Quick policy guide
 
-| Environment | Recommended policy |
-|-------------|--------------------|
+| Environment | Recommended execution policy |
+|-------------|-----------------------------|
 | Solo dev box | `Bypass` |
 | Build agent (trusted repos) | `Bypass` |
-| Shared / multi-tenant server | `RemoteSigned` or `AllSigned`; optionally load profiles in interactive mode only. |
+| Shared / multi-tenant server | `RemoteSigned` or `AllSigned`; optionally load profiles in interactive sessions only. |
 | Air-gapped environment | `Bypass`, but sign scripts to track provenance. |
