@@ -192,6 +192,18 @@ Re-run *Install-PwsShim.ps1* any time to recreate the shim.
 
 ## 7  Quick policy guide
 
+### Alternate execution-policy values
+
+| Policy | Typical use |
+|--------|-------------|
+| `Restricted` | Blocks all scripts; interactive only. |
+| `AllSigned` | Runs scripts **only** if they are digitally signed and trusted. |
+| `RemoteSigned` | Local scripts run freely; scripts from the internet must be signed. |
+| `Unrestricted` | Runs any script but prompts for approval on remote code. |
+| `Bypass` | No policy check, no prompts. |
+| `Undefined` | Uses the effective policy from GPO or registry. |
+
+
 | Environment | Recommended execution policy |
 |-------------|-----------------------------|
 | Solo dev box | `Bypass` |
