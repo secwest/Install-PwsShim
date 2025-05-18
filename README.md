@@ -1,4 +1,4 @@
-# PWS PowerShell Invokation Shim
+# PWS PowerShell Launch Shim
 
 `pws.cmd` is a small batch wrapper plus a one-time installer that
 standardises two PowerShell launch patterns and places them on every shell in
