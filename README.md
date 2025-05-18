@@ -78,8 +78,7 @@ goto :eof
 ### B Stream directly from GitHub (no file on disk first)
 
 ```powershell
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
-  -Command "iwr -UseBasicParsing 'https://raw.githubusercontent.com/secwest/Install-PwsShim/refs/heads/main/Install-PwsShim.ps1' | iex"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "iwr -UseBasicParsing 'https://raw.githubusercontent.com/secwest/Install-PwsShim/refs/heads/main/Install-PwsShim.ps1' | iex"
 ```
 
 Open a **new** shell afterward so the updated `PATH` is loaded.
