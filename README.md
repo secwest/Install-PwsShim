@@ -1,84 +1,109 @@
-# Install-PwsShim.ps1 – What It Does and How to Use It
+# PWS Shim
 
-`Install-PwsShim.ps1` is a one-time helper that **adds a tiny launcher,
-`pws.cmd`, to C:\Tools and makes sure that folder is on the system PATH**.
-Run it once, open a new shell, and you can type `pws` anywhere.
+A tiny batch wrapper that standardises two PowerShell launch patterns:
 
----
+| Command | Result |
+|---------|--------|
+| `pws` | Opens a **new** console window (prefers `pwsh.exe` 7, falls back to Windows PowerShell 5.1). |
+| `pws <script.ps1> [args]` | Runs the script in the **current** console. |
 
-## 1 What the installer script does, step by step
+Flags always used in both modes:
 
-| Step | Action |
-|------|--------|
-| 1 | **Self-elevates** with `Run as Administrator` (using `-NoExit` so you can read the summary). |
-| 2 | Builds the batch **shim** and stores it in `C:\Tools\pws.cmd`. |
-| 3 | Adds `C:\Tools` to the *machine* PATH if it is not already there. |
-| 4 | Prints `pws.cmd written/updated -- added to PATH …` or an “up-to-date” message. |
-
-> **Idempotent:** if the file content and PATH entry already match, the script
-> exits after step 1 with no changes.
-
----
-
-## 2 What the shim itself does
-
-```text
-pws               → opens a new PowerShell window
-pws <file.ps1> …  → runs the script in the current window
+```
+-NoLogo -NoProfile -ExecutionPolicy Bypass
 ```
 
-Both modes run with these flags:
-
-* `-NoLogo` – no banner text
-* `-NoProfile` – ignore user/system profiles
-* `-ExecutionPolicy Bypass` – skip the local policy check
-
-### Engine preference
-
-1. Looks for **pwsh.exe 7+** in common install locations and on PATH.  
-2. Falls back to **Windows PowerShell 5.1** (`%SystemRoot%\System32\…`).
-
-### Why label flow (`goto`) is used
-
-Batch variables expand when the line is parsed.  
-By jumping to labels *after* setting variables (`script`, `PS`), we guarantee
-the correct values are used without delayed expansion quirks.
-
 ---
 
-## 3 Security & flag options
-
-| Flag | Default | Alternate choices |
-|------|---------|-------------------|
-| `-ExecutionPolicy` | `Bypass` (no policy check) | `RemoteSigned`, `AllSigned`, `Undefined`, `Restricted` |
-| `-NoProfile` | Enabled | Remove it if you need profile functions/aliases in interactive mode. |
-
-To change flags: edit the here-string in **Install-PwsShim.ps1**, rerun the
-installer; it will overwrite the shim because the content changed.
-
----
-
-## 4 Install / verify / uninstall
-
-### Install
+## Installation
 
 ```powershell
-# any console – elevation handled automatically
+# any console – script self-elevates if required
 .\Install-PwsShim.ps1
-# open a new shell
 ```
 
-### Verify
+The installer:
+
+* Creates or updates **`C:\Tools\pws.cmd`**.
+* Adds **`C:\Tools`** to the machine **PATH** once.
+* Runs idempotently – re-runs do nothing if state is already correct.
+
+Open a **new** shell after the first install so the updated PATH is loaded.
+
+---
+
+## Usage examples
 
 ```console
 C:\> pws
-# → new pwsh window (if pwsh 7 present)
+# → new pwsh window if installed
 
-C:\> pws .\hello.ps1 arg1 arg2
-# → hello.ps1 runs in current window
+C:\> pws .\deploy.ps1 -Stage Prod
+# → runs deploy.ps1 in the current window
+
+C:\> pws -
+# → executes script piped via STDIN
 ```
 
-### Uninstall
+---
+
+## Flag details, warnings, and customisation
+
+### 1  Flags the shim always passes
+
+| Flag | Meaning | Rationale | Caveats |
+|------|---------|-----------|---------|
+| `-NoLogo` | Suppresses banner text. | Cleaner logs and pipelines. | None. |
+| `-NoProfile` | Skips all profile scripts. | Deterministic startup; avoids breakage from user profiles. | Custom aliases / autoloads are unavailable. |
+| `-ExecutionPolicy Bypass` | Ignores local execution-policy check **for this process only**. | Works the same on dev boxes and locked-down servers without GPO edits. | **Security** – any script will run; use a stricter policy if untrusted code can hit `pws`. |
+
+`Bypass` does **not** disable AMSI, Defender, or AppLocker, but it does ignore
+registry / GPO policy and zone identifiers.
+
+---
+
+### 2  Changing the defaults
+
+* **Different execution policy**
+
+  ```batch
+  -NoLogo -NoProfile -ExecutionPolicy RemoteSigned
+  ```
+
+  Edit the here-string in `Install-PwsShim.ps1`, then re-run the installer.
+
+* **Load profiles in interactive mode only**
+
+  ```batch
+  if "%~1"=="" (
+      start "" "%PS%" -NoLogo -ExecutionPolicy Bypass
+  ) else (
+      ...
+  )
+  ```
+
+* **Extra flags**  
+  `-WorkingDirectory <path>` (pwsh 7)  
+  `-WindowStyle Hidden` (for scheduled tasks)  
+  `-Command "<one-liner>"`
+
+---
+
+### 3  Safe-usage checklist
+
+1. **Signed code or trusted repo** – if you keep `Bypass`, ensure only trusted
+   scripts are reachable via `pws`.
+2. **Version pinning** – shim picks the *first* `pwsh.exe` it finds; adjust the
+   probe order if you run multiple side-by-side versions.
+3. **Antivirus exclusions** – none needed; AMSI remains active.
+4. **Logging** – the new-window path inherits the parent log settings; redirect
+   if you need transcripts.
+5. **Elevation** – `pws` itself does not auto-elevate; child shells run with the
+   same privilege as the caller.
+
+---
+
+### 4  Recovery / rollback
 
 ```powershell
 Remove-Item C:\Tools\pws.cmd
@@ -88,11 +113,15 @@ $envPath = [Environment]::GetEnvironmentVariable('Path','Machine') -split ';' |
 # log off or open a new shell
 ```
 
+Re-run `Install-PwsShim.ps1` at any time to recreate the shim.
+
 ---
 
-## 5 Summary
+### 5  Quick reference
 
-* One installer, one batch file, one PATH entry – nothing else.
-* Safe to re-run; makes no changes when the system is already configured.
-* Works on any Windows box with PowerShell 5.1; automatically uses PowerShell 7
-  when available.
+| Environment | Recommended policy |
+|-------------|--------------------|
+| Single-user dev box | Defaults are fine. |
+| Build agent (trusted repos only) | Defaults are fine. |
+| Shared jump box / multi-tenant server | Use `RemoteSigned` or `AllSigned`; consider loading profiles in interactive mode. |
+| Air-gapped environment | Keep `Bypass`, but sign scripts to track provenance. |
