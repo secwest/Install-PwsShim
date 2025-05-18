@@ -1,98 +1,90 @@
-# Install-PwsShim.ps1 – What It Does and How to Use It
+<#
+.SYNOPSIS
+  Create or update C:\Tools\pws.cmd and add C:\Tools to the machine PATH.
 
-`Install-PwsShim.ps1` is a one-time helper that **adds a tiny launcher,
-`pws.cmd`, to C:\Tools and makes sure that folder is on the system PATH**.
-Run it once, open a new shell, and you can type `pws` anywhere.
+.DESCRIPTION
+  * Drops a dual-mode shim:
+      pws              -> opens a new PowerShell window
+      pws <file.ps1>   -> runs the script in the current window
+    Flags used in both modes:
+      -NoLogo -NoProfile -ExecutionPolicy Bypass
+  * Prefers pwsh 7 if it exists, falls back to Windows PowerShell 5.1.
+  * Self-elevates once, then exits if no changes are needed (idempotent).
+#>
 
----
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
-## 1 What the installer script does, step by step
+# --- elevate if needed -------------------------------------------------------
+$admin = ([Security.Principal.WindowsPrincipal] `
+          [Security.Principal.WindowsIdentity]::GetCurrent() `
+         ).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
 
-| Step | Action |
-|------|--------|
-| 1 | **Self-elevates** with `Run as Administrator` (using `-NoExit` so you can read the summary). |
-| 2 | Builds the batch **shim** and stores it in `C:\Tools\pws.cmd`. |
-| 3 | Adds `C:\Tools` to the *machine* PATH if it is not already there. |
-| 4 | Prints `pws.cmd written/updated -- added to PATH …` or an “up-to-date” message. |
+if (-not $admin) {
+    $childArgs = @(
+        '-NoExit','-NoLogo','-NoProfile','-ExecutionPolicy','Bypass',
+        '-File',"`"$PSCommandPath`""
+    ) + ($args | ForEach-Object { "`"$_`"" })
 
-> **Idempotent:** if the file content and PATH entry already match, the script
-> exits after step 1 with no changes.
+    Start-Process powershell.exe -ArgumentList $childArgs -Verb RunAs
+    exit
+}
 
----
+# --- paths -------------------------------------------------------------------
+$dir  = 'C:\Tools'
+$file = "$dir\pws.cmd"
 
-## 2 What the shim itself does
+$body = @'
+@echo off
+setlocal
 
-```text
-pws               → opens a new PowerShell window
-pws <file.ps1> …  → runs the script in the current window
-```
+rem choose pwsh 7 if present; else use Windows PowerShell 5.1
+for %%P in ("%ProgramFiles%\PowerShell\pwsh.exe" ^
+            "%ProgramFiles%\PowerShell\7\pwsh.exe" ^
+            "%ProgramFiles%\PowerShell\7-preview\pwsh.exe" ^
+            "pwsh.exe") do (
+    if not defined PS if exist "%%~P" set "PS=%%~P"
+)
+if not defined PS set "PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 
-Both modes run with these flags:
+rem no args -> new window ; args -> run script here
+if "%~1"=="" goto interactive
 
-* `-NoLogo` – no banner text
-* `-NoProfile` – ignore user/system profiles
-* `-ExecutionPolicy Bypass` – skip the local policy check
+:runfile
+set "script=%~1"
+shift
+"%PS%" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%script%" %*
+goto :eof
 
-### Engine preference
+:interactive
+start "" "%PS%" -NoLogo -NoProfile -ExecutionPolicy Bypass
+goto :eof
+'@
 
-1. Looks for **pwsh.exe 7+** in common install locations and on PATH.  
-2. Falls back to **Windows PowerShell 5.1** (`%SystemRoot%\System32\…`).
+# --- create directory --------------------------------------------------------
+if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
 
-### Why label flow (`goto`) is used
+# --- write shim only when content changed -----------------------------------
+$rewrite = (-not (Test-Path $file)) -or ((Get-Content $file -Raw) -ne $body)
+if ($rewrite) {
+    $enc = if ($PSVersionTable.PSEdition -eq 'Core' -and $PSVersionTable.PSVersion.Major -ge 7) {
+        'UTF8NoBOM'
+    } else {
+        'Ascii'
+    }
+    Set-Content -Path $file -Value $body -Encoding $enc
+    $fileState = 'written/updated'
+} else {
+    $fileState = 'up-to-date'
+}
 
-Batch variables expand when the line is parsed.  
-By jumping to labels *after* setting variables (`script`, `PS`), we guarantee
-the correct values are used without delayed expansion quirks.
+# --- ensure C:\Tools is in PATH ---------------------------------------------
+$parts = [Environment]::GetEnvironmentVariable('Path','Machine') -split ';'
+if ($parts -notcontains $dir) {
+    [Environment]::SetEnvironmentVariable('Path', ($parts + $dir) -join ';','Machine')
+    $pathState = 'added to PATH (open new shell)'
+} else {
+    $pathState = 'PATH already contained C:\Tools'
+}
 
----
-
-## 3 Security & flag options
-
-| Flag | Default | Alternate choices |
-|------|---------|-------------------|
-| `-ExecutionPolicy` | `Bypass` (no policy check) | `RemoteSigned`, `AllSigned`, `Undefined`, `Restricted` |
-| `-NoProfile` | Enabled | Remove it if you need profile functions/aliases in interactive mode. |
-
-To change flags: edit the here-string in **Install-PwsShim.ps1**, rerun the
-installer; it will overwrite the shim because the content changed.
-
----
-
-## 4 Install / verify / uninstall
-
-### Install
-
-```powershell
-# any console – elevation handled automatically
-.\Install-PwsShim.ps1
-# open a new shell
-```
-
-### Verify
-
-```console
-C:\> pws
-# → new pwsh window (if pwsh 7 present)
-
-C:\> pws .\hello.ps1 arg1 arg2
-# → hello.ps1 runs in current window
-```
-
-### Uninstall
-
-```powershell
-Remove-Item C:\Tools\pws.cmd
-$envPath = [Environment]::GetEnvironmentVariable('Path','Machine') -split ';' |
-           Where-Object { $_ -ne 'C:\Tools' } -join ';'
-[Environment]::SetEnvironmentVariable('Path',$envPath,'Machine')
-# log off or open a new shell
-```
-
----
-
-## 5 Summary
-
-* One installer, one batch file, one PATH entry – nothing else.
-* Safe to re-run; makes no changes when the system is already configured.
-* Works on any Windows box with PowerShell 5.1; automatically uses PowerShell 7
-  when available.
+Write-Host "pws.cmd $fileState -- $pathState"
