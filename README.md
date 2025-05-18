@@ -1,6 +1,6 @@
 # PWS Shim
 
-`pws.cmd` is a four-line batch wrapper plus a one-time installer that
+`pws.cmd` is a small batch wrapper plus a one-time installer that
 standardises two PowerShell launch patterns and places them on every shell in
 Windows.
 
